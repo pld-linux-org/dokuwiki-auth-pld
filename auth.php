@@ -6,12 +6,15 @@
  * @author     Elan Ruusamäe <glen@pld-linux.org>
  */
 
+// PLD separates local configuration from the packaged defaults in DOKU_CONF.
+define('AUTH_PLDDIR', rtrim(defined('DOKU_LOCAL') ? DOKU_LOCAL : DOKU_CONF, '/').'/pld');
+
 // copied from CVSROOT/passwd
-define('AUTH_USERFILE', DOKU_CONF.'/pld/passwd');
+define('AUTH_USERFILE', AUTH_PLDDIR.'/passwd');
 // cvs up CVSROOT/users
-define('AUTH_INFOFILE', DOKU_CONF.'/pld/users');
+define('AUTH_INFOFILE', AUTH_PLDDIR.'/users');
 // manually modified
-define('AUTH_GROUPFILE', DOKU_CONF.'/pld/groups');
+define('AUTH_GROUPFILE', AUTH_PLDDIR.'/groups');
 
 class auth_plugin_authpld extends auth_plugin_authplain {
     /**
@@ -21,33 +24,15 @@ class auth_plugin_authpld extends auth_plugin_authplain {
      * able to operate. Set capabilities.
      */
     public function __construct() {
-        // NOTE: not calling parent, as don't want to inherit constructor
+        // authplain's constructor enables writes to its own users.auth.php file.
 
         if (!@is_readable(AUTH_USERFILE)){
             $this->success = false;
         }else{
             $this->cando['getUsers']     = true;
             $this->cando['getUserCount'] = true;
+            $this->cando['getGroups']    = true;
         }
-    }
-
-    /**
-     * Return user info
-     *
-     * Returns info about the given user needs to contain
-     * at least these fields:
-     *
-     * name string  full name of the user
-     * mail string  email addres of the user
-     * grps array   list of groups the user is in
-     *
-     */
-    public function getUserData($user){
-        if ($this->users === null) {
-            $this->_loadUserFile();
-        }
-
-        return isset($this->users[$user]) ? $this->users[$user] : false;
     }
 
     /**
@@ -56,7 +41,7 @@ class auth_plugin_authpld extends auth_plugin_authplain {
      * loads the user file into a datastructure
      *
      */
-    private function _loadUserFile(){
+    protected function loadUserData(){
         $this->users = array();
 
         if(!@file_exists(AUTH_USERFILE)) return;
@@ -68,14 +53,17 @@ class auth_plugin_authpld extends auth_plugin_authplain {
             if(empty($line)) continue;
 
             $row = explode(":",$line,6);
+            if (count($row) < 3 || $row[0] === '') continue;
+            // CVS records may omit the metadata, name and account status.
+            $row = array_pad($row, 6, '');
 
             // skip builders
             if (preg_match('/^builder/', $row[0])) {
                 continue;
             }
 
-            // skip if fifth column is set is not 'Enable'
-            if (!empty($row[5]) && $row[5] != 'Enable') {
+            // skip if sixth column is set and is not 'Enable'
+            if ($row[5] !== '' && $row[5] !== 'Enable') {
                 continue;
             }
 
@@ -106,6 +94,7 @@ class auth_plugin_authpld extends auth_plugin_authplain {
         if (empty($line)) continue;
 
         $row = explode(":", $line, 2);
+        if (count($row) < 2) continue;
         $user = array_shift($row);
         $groups = explode(",",$row[0]);
 
@@ -116,7 +105,7 @@ class auth_plugin_authpld extends auth_plugin_authplain {
         $groups = array_merge($this->users[$user]['grps'], $groups);
 
         // remove users with @readonly group from 'users'
-        if (array_search('readonly', $groups)) {
+        if (in_array('readonly', $groups, true)) {
             $groups = array_filter($groups, function($v) { return $v != 'user'; });
         }
 
@@ -136,7 +125,9 @@ class auth_plugin_authpld extends auth_plugin_authplain {
         $line = trim($line);
         if (empty($line)) continue;
 
-        list($user, $mail, $name, $jid) = explode(":", $line, 4);
+        $row = explode(":", $line, 4);
+        if (count($row) < 3) continue;
+        list($user, $mail, $name, $jid) = array_pad($row, 4, '');
 
         if (!isset($this->users[$user])) {
             continue;
